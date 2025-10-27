@@ -11,7 +11,12 @@ except Exception:
     Groq = None
 import markdown
 from markupsafe import Markup
-from ml_model import get_analyzer
+
+# Try to use full model, fallback to lite model
+try:
+    from ml_model import get_analyzer
+except Exception:
+    from ml_model_lite import get_analyzer
 
 # Load environment variables from .env file
 load_dotenv()
