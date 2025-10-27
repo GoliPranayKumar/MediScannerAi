@@ -4,7 +4,6 @@
   "outputDirectory": "frontend/build",
   "public": true,
   "env": {
-    "GROQ_API_KEY": "@groq_api_key",
     "FLASK_ENV": "production"
   },
   "functions": {
