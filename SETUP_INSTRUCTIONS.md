@@ -16,10 +16,11 @@ pip install -r requirements.txt
 ```
 
 ### 2. Environment Configuration
-The `.env` file is already configured with your Grok API key:
+Create a `.env` file in the root directory with your Groq API key:
 ```
-GROQ_API_KEY=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
+GROQ_API_KEY=your_groq_api_key_here
 ```
+Get your free API key from: https://console.groq.com
 
 ## Frontend Setup
 
