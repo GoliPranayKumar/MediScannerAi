@@ -70,12 +70,8 @@ def health_check():
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze_image():
-    """Analyze image using Groq API"""
+    """Analyze image using Groq API or fallback to ML models"""
     try:
-        groq_api_key = ENV_GROQ_API_KEY
-        if not groq_api_key:
-            return jsonify({"error": "Groq API Key not configured"}), 400
-
         if "image" not in request.files:
             return jsonify({"error": "No image file provided"}), 400
         
@@ -90,35 +86,38 @@ def analyze_image():
         filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(filepath)
 
-        base64_image = encode_image(filepath)
-        if Groq is None:
-            raise RuntimeError("Groq SDK is not available. Install the 'groq' package before using analysis.")
-
-        client = Groq(api_key=groq_api_key)
-        
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": MEDICAL_QUERY},
+        # Try Groq first if available
+        groq_api_key = ENV_GROQ_API_KEY
+        if groq_api_key and Groq is not None:
+            try:
+                base64_image = encode_image(filepath)
+                client = Groq(api_key=groq_api_key)
+                
+                chat_completion = client.chat.completions.create(
+                    messages=[
                         {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                            },
-                        },
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": MEDICAL_QUERY},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}",
+                                    },
+                                },
+                            ],
+                        }
                     ],
-                }
-            ],
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-        )
-        markdown_result = chat_completion.choices[0].message.content
-
-        # Convert markdown to HTML
-        result_html = markdown.markdown(markdown_result, extensions=["fenced_code", "tables"])
+                    model="meta-llama/llama-4-scout-17b-16e-instruct",
+                )
+                markdown_result = chat_completion.choices[0].message.content
+                result_html = markdown.markdown(markdown_result, extensions=["fenced_code", "tables"])
+                return jsonify({"result": result_html}), 200
+            except Exception as groq_error:
+                logging.warning(f"Groq analysis failed, falling back to ML models: {groq_error}")
         
-        return jsonify({"result": result_html}), 200
+        # Fallback to ML models
+        return ml_analyze_image()
     
     except Exception as e:
         logging.exception("Error while performing analysis")
