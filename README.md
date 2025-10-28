@@ -398,6 +398,25 @@ curl -X POST http://localhost:5000/api/ml-analyze \
     },
     "recommendation": "High confidence detection - Recommend clinical review"
   }
+  }
+
+  ## 🧪 ML Training (Optional)
+
+  You can train a simple classifier using lightweight image statistics (mean, std, contrast, size) and then use it in the app.
+
+  1. Prepare a CSV `labels.csv` with columns: `filename,label` (filename relative to images directory).
+  2. Put images in a folder (for example `uploads/` or `train_images/`).
+  3. Install training deps and run:
+
+  ```powershell
+  python -m pip install -r requirements.txt
+  python train_model.py --images_dir uploads --labels labels.csv --output model.joblib
+  ```
+
+  4. Once `model.joblib` exists in the project root, the `/api/ml-analyze` endpoint will attempt to run the classifier and include a `model_info` field in responses.
+
+  Notes:
+  - The training script uses simple handcrafted features and a RandomForest classifier as a scaffold for experimentation; it's not a clinical model. You should collect labeled data and validate thoroughly before using in any decision-making.
 }
 ```
 

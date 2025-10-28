@@ -29,18 +29,11 @@ class MedicalImagingAnalyzer:
             
             # Image properties
             height, width = img_array.shape[:2]
-            
-            # Calculate statistics
-            if len(img_array.shape) == 3:
-                # Color image
-                mean_intensity = np.mean(img_array)
-                std_intensity = np.std(img_array)
-                contrast = std_intensity / (mean_intensity + 1e-6)
-            else:
-                # Grayscale
-                mean_intensity = np.mean(img_array)
-                std_intensity = np.std(img_array)
-                contrast = std_intensity / (mean_intensity + 1e-6)
+
+            # Calculate statistics (work across channels if present)
+            mean_intensity = float(np.mean(img_array))
+            std_intensity = float(np.std(img_array))
+            contrast = float(std_intensity / (mean_intensity + 1e-6))
             
             # Determine image type
             if mean_intensity < 50:
@@ -65,8 +58,12 @@ class MedicalImagingAnalyzer:
             findings = {
                 "image_type": image_type,
                 "dimensions": f"{width}x{height} pixels",
+                # keep both programmatic numeric values and formatted strings
                 "mean_intensity": f"{mean_intensity:.2f}",
+                "mean_intensity_value": mean_intensity,
+                "std_intensity_value": std_intensity,
                 "contrast_ratio": f"{contrast:.2f}",
+                "contrast_value": contrast,
                 "characteristics": characteristics,
                 "quality_assessment": quality,
                 "recommendations": self._get_recommendations(mean_intensity, contrast)
@@ -97,3 +94,23 @@ class MedicalImagingAnalyzer:
 def get_analyzer():
     """Get analyzer instance"""
     return MedicalImagingAnalyzer()
+
+
+def extract_features_for_ml(image_path):
+    """Helper that returns a simple feature dict suitable for ML training/prediction.
+
+    Returns:
+        dict: {"mean_intensity": float, "std_intensity": float, "contrast": float, "width": int, "height": int}
+    """
+    analyzer = get_analyzer()
+    res = analyzer.analyze_image(image_path)
+    if res.get("error"):
+        raise RuntimeError(res["error"])
+
+    return {
+        "mean_intensity": float(res.get("mean_intensity_value", 0.0)),
+        "std_intensity": float(res.get("std_intensity_value", 0.0)),
+        "contrast": float(res.get("contrast_value", 0.0)),
+        "width": int(res.get("dimensions", "0x0").split("x")[0]) if "dimensions" in res else 0,
+        "height": int(res.get("dimensions", "0x0").split("x")[1].split()[0]) if "dimensions" in res else 0,
+    }

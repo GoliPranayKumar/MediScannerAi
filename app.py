@@ -17,6 +17,9 @@ try:
     from ml_model import get_analyzer
 except Exception:
     from ml_model_lite import get_analyzer
+    from ml_model_lite import extract_features_for_ml
+import joblib
+from pathlib import Path
 
 # Load environment variables from .env file
 load_dotenv()
@@ -59,6 +62,11 @@ Keep the explanation simple and direct. Avoid lengthy details and technical jarg
 def encode_image(image_path):
     with open(image_path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode('utf-8')
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "ok", "message": "Backend is running"}), 200
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze_image():
@@ -137,14 +145,59 @@ def ml_analyze_image():
 
         # Get analyzer instance
         analyzer = get_analyzer()
-        
-        # Perform ensemble analysis
-        analysis_result = analyzer.ensemble_analysis(filepath)
-        
-        # Format results as HTML
-        html_result = format_ml_analysis(analysis_result)
-        
-        return jsonify({"result": html_result, "analysis": analysis_result}), 200
+
+        # If the analyzer provides an ensemble method (full ml_model), use it
+        if hasattr(analyzer, 'ensemble_analysis'):
+            analysis_result = analyzer.ensemble_analysis(filepath)
+            html_result = format_ml_analysis(analysis_result)
+            return jsonify({"result": html_result, "analysis": analysis_result}), 200
+
+        # Fallback for lightweight analyzer: use analyze_image and optionally a saved classifier
+        findings = analyzer.analyze_image(filepath)
+
+        # Try to load a trained sklearn model if available and run prediction using features
+        model_path = Path("model.joblib")
+        model_info = None
+        if model_path.exists():
+            try:
+                clf = joblib.load(model_path)
+                feats = extract_features_for_ml(filepath)
+                X = [[feats['mean_intensity'], feats['std_intensity'], feats['contrast'], feats['width'], feats['height']]]
+                pred = clf.predict(X)[0]
+                proba = clf.predict_proba(X).max() if hasattr(clf, 'predict_proba') else None
+                model_info = {"prediction": str(pred), "confidence": float(proba) if proba is not None else None}
+            except Exception as e:
+                logging.exception('Error loading or running ML model')
+                model_info = {"error": str(e)}
+
+        # Simple HTML representation for findings
+        html_result = "<div style='font-family: Arial, sans-serif;'>"
+        if 'error' in findings:
+            html_result += f"<p style='color:red;'>Error: {findings['error']}</p>"
+        else:
+            html_result += f"<h3>Image Quality Analysis</h3><p><strong>Type:</strong> {findings.get('image_type')}<br/>"
+            html_result += f"<strong>Dimensions:</strong> {findings.get('dimensions')}<br/>"
+            html_result += f"<strong>Mean intensity:</strong> {findings.get('mean_intensity')}<br/>"
+            html_result += f"<strong>Contrast:</strong> {findings.get('contrast_ratio')}<br/>"
+            html_result += f"<strong>Quality:</strong> {findings.get('quality_assessment')}<br/></p>"
+            html_result += "<h4>Recommendations</h4><ul>"
+            for r in findings.get('recommendations', []):
+                html_result += f"<li>{r}</li>"
+            html_result += "</ul>"
+
+        if model_info is not None:
+            html_result += "<h4>Trained Model Prediction</h4>"
+            if 'error' in model_info:
+                html_result += f"<p style='color:red;'>Model error: {model_info['error']}</p>"
+            else:
+                html_result += f"<p><strong>Prediction:</strong> {model_info.get('prediction')}"
+                if model_info.get('confidence') is not None:
+                    html_result += f" &nbsp; (<em>confidence: {model_info['confidence']:.2f}</em>)"
+                html_result += "</p>"
+
+        html_result += "</div>"
+
+        return jsonify({"result": html_result, "analysis": findings, "model_info": model_info}), 200
     
     except Exception as e:
         logging.exception("Error during ML analysis")
@@ -152,46 +205,78 @@ def ml_analyze_image():
 
 
 def format_ml_analysis(analysis_result):
-    """Format ML analysis results as HTML"""
+    """Format ML analysis results as HTML using trained medical models"""
     try:
         if "error" in analysis_result:
             return f"<p style='color: red;'><strong>Error:</strong> {analysis_result['error']}</p>"
         
-        html = "<div style='font-family: Arial, sans-serif;'>"
+        html = "<div style='font-family: Arial, sans-serif; background: #f5f5f5; padding: 15px; border-radius: 8px;'>"
+        
+        # Trained Datasets Info
+        if "trained_datasets" in analysis_result:
+            html += "<div style='background: #e3f2fd; padding: 10px; border-radius: 5px; margin-bottom: 15px;'>"
+            html += "<p style='margin: 0; font-size: 12px; color: #1976d2;'><strong>📚 Trained on Medical Datasets:</strong></p>"
+            for dataset in analysis_result["trained_datasets"]:
+                html += f"<p style='margin: 5px 0; font-size: 11px; color: #1565c0;'>• {dataset}</p>"
+            html += "</div>"
         
         # Ensemble Results
         if "ensemble_confidence" in analysis_result:
+            confidence = analysis_result['ensemble_confidence']
+            color = "#d32f2f" if confidence >= 85 else "#f57c00" if confidence >= 70 else "#fbc02d" if confidence >= 50 else "#388e3c"
             html += f"""
-            <h3>🤖 Ensemble Analysis Results</h3>
-            <p><strong>Combined Confidence Score:</strong> {analysis_result['ensemble_confidence']:.2f}%</p>
-            <p><strong>Recommendation:</strong> {analysis_result['recommendation']}</p>
+            <div style='background: {color}20; border-left: 4px solid {color}; padding: 12px; margin-bottom: 15px; border-radius: 4px;'>
+            <h3 style='margin-top: 0; color: {color};'>🤖 Ensemble Analysis (Trained Medical Models)</h3>
+            <p style='margin: 8px 0;'><strong>Combined Confidence Score:</strong> <span style='font-size: 18px; color: {color};'>{confidence:.1f}%</span></p>
+            <p style='margin: 8px 0;'><strong>Clinical Recommendation:</strong> {analysis_result['recommendation']}</p>
+            </div>
             """
         
-        # DenseNet Results
+        # DenseNet Results (CheXpert-trained)
         if "densenet_result" in analysis_result and "error" not in analysis_result["densenet_result"]:
             dn = analysis_result["densenet_result"]
             html += f"""
-            <h4>📊 DenseNet121 Analysis</h4>
-            <p><strong>Top Prediction:</strong> {dn['top_prediction']}</p>
-            <p><strong>Confidence:</strong> {dn['confidence']:.2f}%</p>
-            <ul>
+            <div style='background: white; padding: 12px; margin-bottom: 12px; border-radius: 5px; border: 1px solid #ddd;'>
+            <h4 style='margin-top: 0; color: #1976d2;'>🔬 DenseNet121 Analysis (CheXpert-trained)</h4>
+            <p style='margin: 5px 0;'><strong>Dataset:</strong> {dn.get('dataset', 'CheXpert')}</p>
+            <p style='margin: 5px 0;'><strong>Top Finding:</strong> <span style='color: #d32f2f; font-weight: bold;'>{dn['top_prediction']}</span></p>
+            <p style='margin: 5px 0;'><strong>Confidence:</strong> {dn['confidence']:.1f}%</p>
+            <p style='margin: 5px 0;'><strong>Top Detections:</strong></p>
+            <ul style='margin: 5px 0; padding-left: 20px;'>
             """
             for pred in dn["predictions"][:3]:
-                html += f"<li>{pred['class']}: {pred['confidence']:.2f}%</li>"
-            html += "</ul>"
+                html += f"<li>{pred['class']}: {pred['confidence']:.1f}%</li>"
+            html += "</ul></div>"
         
-        # ResNet Results
+        # MobileNetV2 Results (MIMIC-CXR-trained)
+        if "mobilenet_result" in analysis_result and "error" not in analysis_result["mobilenet_result"]:
+            mn = analysis_result["mobilenet_result"]
+            html += f"""
+            <div style='background: white; padding: 12px; margin-bottom: 12px; border-radius: 5px; border: 1px solid #ddd;'>
+            <h4 style='margin-top: 0; color: #388e3c;'>🔬 MobileNetV2 Analysis (MIMIC-CXR-trained)</h4>
+            <p style='margin: 5px 0;'><strong>Dataset:</strong> {mn.get('dataset', 'MIMIC-CXR')}</p>
+            <p style='margin: 5px 0;'><strong>Top Finding:</strong> <span style='color: #388e3c; font-weight: bold;'>{mn['top_prediction']}</span></p>
+            <p style='margin: 5px 0;'><strong>Confidence:</strong> {mn['confidence']:.1f}%</p>
+            <p style='margin: 5px 0;'><strong>Top Detections:</strong></p>
+            <ul style='margin: 5px 0; padding-left: 20px;'>
+            """
+            for pred in mn["predictions"][:3]:
+                html += f"<li>{pred['class']}: {pred['confidence']:.1f}%</li>"
+            html += "</ul></div>"
+        
+        # Legacy ResNet support
         if "resnet_result" in analysis_result and "error" not in analysis_result["resnet_result"]:
             rn = analysis_result["resnet_result"]
             html += f"""
-            <h4>📊 ResNet50 Analysis</h4>
-            <p><strong>Top Prediction:</strong> {rn['top_prediction']}</p>
-            <p><strong>Confidence:</strong> {rn['confidence']:.2f}%</p>
-            <ul>
+            <div style='background: white; padding: 12px; margin-bottom: 12px; border-radius: 5px; border: 1px solid #ddd;'>
+            <h4 style='margin-top: 0;'>📊 ResNet50 Analysis</h4>
+            <p style='margin: 5px 0;'><strong>Top Prediction:</strong> {rn['top_prediction']}</p>
+            <p style='margin: 5px 0;'><strong>Confidence:</strong> {rn['confidence']:.1f}%</p>
+            <ul style='margin: 5px 0; padding-left: 20px;'>
             """
             for pred in rn["predictions"][:3]:
-                html += f"<li>{pred['class']}: {pred['confidence']:.2f}%</li>"
-            html += "</ul>"
+                html += f"<li>{pred['class']}: {pred['confidence']:.1f}%</li>"
+            html += "</ul></div>"
         
         html += "</div>"
         return html

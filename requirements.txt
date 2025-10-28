@@ -1,9 +1,24 @@
-flask
-flask-cors
-groq
-markdown
-markupsafe
-python-dotenv
-numpy>=1.24.0
-Pillow>=10.0.0
+# Web Framework
+flask>=2.3.0
+flask-cors>=4.0.0
 gunicorn>=21.0.0
+
+# AI/ML - Trained Medical Models
+tensorflow>=2.10.0
+keras>=2.10.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# Image Processing
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Utilities
+python-dotenv>=1.0.0
+markdown>=3.4.0
+markupsafe>=2.1.0
+joblib>=1.3.0
+
+# Optional: For GPU acceleration (uncomment if using CUDA)
+# tensorflow-gpu>=2.10.0
+# tensorflow-metal>=1.0.0  # For Apple Silicon
